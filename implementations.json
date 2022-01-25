@@ -79,6 +79,11 @@
     "url": "https://github.com/haproxy/haproxy",
     "role": "server"
   },
+  "quinn": {
+    "image": "stammw/quinn-interop:latest",
+    "url": "https://github.com/quinn-rs/quinn",
+    "role": "both"
+  },
   "attacker-example": {
     "image": "attacker",
     "url": "https://github.com/attilio-oliva/quic-attacker-runner.git",
