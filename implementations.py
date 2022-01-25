@@ -8,7 +8,7 @@ class Role(Enum):
     BOTH = "both"
     SERVER = "server"
     CLIENT = "client"
-
+    ATTACKER = "attacker"
 
 with open("implementations.json", "r") as f:
     data = json.load(f)
@@ -21,5 +21,7 @@ with open("implementations.json", "r") as f:
             IMPLEMENTATIONS[name]["role"] = Role.CLIENT
         elif role == "both":
             IMPLEMENTATIONS[name]["role"] = Role.BOTH
+        elif role == "attacker":
+            IMPLEMENTATIONS[name]["role"] = Role.ATTACKER
         else:
             raise Exception("unknown role: " + role)

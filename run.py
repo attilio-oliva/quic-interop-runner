@@ -3,6 +3,7 @@
 import argparse
 import sys
 from typing import List, Tuple
+from attacks import ATTACKS, Attack, AttackInitFlood
 
 import testcases
 from implementations import IMPLEMENTATIONS, Role
@@ -23,7 +24,11 @@ server_implementations = [
     for name, value in IMPLEMENTATIONS.items()
     if value["role"] == Role.BOTH or value["role"] == Role.SERVER
 ]
-
+attacker_implementations = [
+    name
+    for name, value in IMPLEMENTATIONS.items()
+    if value["role"] == Role.ATTACKER
+]
 
 def main():
     def get_args():
@@ -35,6 +40,9 @@ def main():
             const=True,
             default=False,
             help="turn on debug logs",
+        )
+        parser.add_argument(
+            "-a", "--attacker", help="attacker implementations (comma-separated)"
         )
         parser.add_argument(
             "-s", "--server", help="server implementations (comma-separated)"
@@ -90,22 +98,27 @@ def main():
 
     def get_tests_and_measurements(
         arg,
-    ) -> Tuple[List[testcases.TestCase], List[testcases.TestCase]]:
+    ) -> Tuple[List[testcases.TestCase], List[testcases.TestCase], List[Attack]]:
         if arg is None:
-            return TESTCASES, MEASUREMENTS
+            return TESTCASES, MEASUREMENTS, ATTACKS
         elif arg == "onlyTests":
-            return TESTCASES, []
+            return TESTCASES, [], []
         elif arg == "onlyMeasurements":
-            return [], MEASUREMENTS
+            return [], MEASUREMENTS, []
+        elif arg == "onlyAttacks":
+            return [], [], ATTACKS
         elif not arg:
             return []
         tests = []
         measurements = []
+        attacks = []
         for t in arg.split(","):
             if t in [tc.name() for tc in TESTCASES]:
                 tests += [tc for tc in TESTCASES if tc.name() == t]
             elif t in [tc.name() for tc in MEASUREMENTS]:
                 measurements += [tc for tc in MEASUREMENTS if tc.name() == t]
+            elif t in [tc.name() for tc in ATTACKS]:
+                attacks += [tc for tc in ATTACKS if tc.name() == t]
             else:
                 print(
                     (
@@ -126,8 +139,10 @@ def main():
         implementations=implementations,
         servers=get_impls(get_args().server, server_implementations, "Server"),
         clients=get_impls(get_args().client, client_implementations, "Client"),
+        attackers=get_impls(get_args().attacker, attacker_implementations, "Attacker"),
         tests=t[0],
         measurements=t[1],
+        attacks=t[2],
         output=get_args().json,
         debug=get_args().debug,
         log_dir=get_args().log_dir,

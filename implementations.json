@@ -78,5 +78,10 @@
     "image": "haproxytech/haproxy-qns:latest",
     "url": "https://github.com/haproxy/haproxy",
     "role": "server"
+  },
+  "attacker-example": {
+    "image": "attacker",
+    "url": "https://github.com/attilio-oliva/quic-attacker-runner.git",
+    "role": "attacker"
   }
 }
