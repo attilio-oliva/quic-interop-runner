@@ -124,15 +124,17 @@ def main():
                     (
                         "Test case {} not found.\n"
                         "Available testcases: {}\n"
-                        "Available measurements: {}"
+                        "Available measurements: {}\n"
+                        "Available attacks: {}"
                     ).format(
                         t,
                         ", ".join([t.name() for t in TESTCASES]),
                         ", ".join([t.name() for t in MEASUREMENTS]),
+                        ", ".join([t.name() for t in ATTACKS]),
                     )
                 )
                 sys.exit()
-        return tests, measurements
+        return tests, measurements, attacks
 
     t = get_tests_and_measurements(get_args().test)
     return InteropRunner(

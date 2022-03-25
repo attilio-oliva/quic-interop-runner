@@ -19,6 +19,7 @@ import testcases
 from result import TestResult
 from testcases import Perspective
 import attacks
+from attacks import AttackTarget
 import time
 import threading
 
@@ -33,28 +34,6 @@ def log_resources(name: string, target: string, log_dir: tempfile.TemporaryDirec
         output = subprocess.run(
             cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
-    
-def wait_for_attack(target: string, containers: string):
-    cmd = f"docker stats {target} --no-stream --format \"{{{{.CPUPerc}}}}\""
-    while True:
-        time.sleep(0.1)
-        output = subprocess.run(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        )
-        line = output.stdout.decode('utf-8')
-        if len(line) > 0:
-            try:
-                cpu_usage = float(line[:-2])
-                if cpu_usage >= 25.0:
-                    #Stop containers, the attack was successfull
-                    print("SUCCESS")
-                    cmd = "docker-compose stop " + containers
-                    out = subprocess.run(
-                        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60
-                    )
-                    sys.exit(0)
-            except:
-                pass
     
 class MeasurementResult:
     result = TestResult
@@ -126,17 +105,31 @@ class InteropRunner:
         for server in servers:
             self.test_results[server] = {}
             self.measurement_results[server] = {}
-            self.attack_results[server] = {}
+            
             for client in clients:
                 self.test_results[server][client] = {}
                 for test in self._tests:
                     self.test_results[server][client][test] = {}
                 self.measurement_results[server][client] = {}
-                self.attack_results[server][client] = {}
                 for measurement in measurements:
                     self.measurement_results[server][client][measurement] = {}
-                for attack in attacks:
-                    self.attack_results[server][client][attack] = {}
+        #Last for cycle could be reused for better performance rather then readability
+        attack_targets = [a for a in AttackTarget]
+        for target in attack_targets:
+            target_str = target.value
+            self.attack_results[target_str] = {}
+            for attacker in attackers:
+                self.attack_results[target_str][attacker] = {}
+                if target == AttackTarget.CLIENT:
+                    for client in clients:
+                        self.attack_results[target_str][attacker][client] = {}
+                if target == AttackTarget.SERVER or target == AttackTarget.BOTH:
+                    for server in servers:
+                        self.attack_results[target_str][attacker][server] = {}
+                        if target == AttackTarget.BOTH:
+                            self.attack_results[target_str][attacker][server][client] = {}
+                
+                
 
     def _is_unsupported(self, lines: List[str]) -> bool:
         return any("exited with code 127" in str(line) for line in lines) or any(
@@ -269,14 +262,18 @@ class InteropRunner:
             t.hrules = prettytable.ALL
             t.vrules = prettytable.ALL
             t.field_names = [""] + [name for name in self._servers]
-            for client in self._clients:
-                row = [client]
+            
+            for attacker in self._attackers:
+                row = [attacker]
+            #for client in self._clients:
+            #    row = [client]
                 for server in self._servers:
-                    cell = self.attack_results[server][client]
-                    res = colored(get_letters(TestResult.SUCCEEDED), "green") + "\n"
-                    res += colored(get_letters(TestResult.UNSUPPORTED), "grey") + "\n"
-                    res += colored(get_letters(TestResult.FAILED), "red")
-                    row += [res]
+                    for attack in self._attacks:
+                        cell = self.attack_results[attack.target().value][attacker][server]
+                        res = colored(get_letters(TestResult.SUCCEEDED), "green") + "\n"
+                        res += colored(get_letters(TestResult.UNSUPPORTED), "grey") + "\n"
+                        res += colored(get_letters(TestResult.FAILED), "red")
+                        row += [res]
                 t.add_row(row)
             print(t)        
             
@@ -300,15 +297,25 @@ class InteropRunner:
                     "name": x.name(),
                     "desc": x.desc(),
                 }
-                for x in self._tests + self._measurements + self._attacks
+                for x in self._tests + self._measurements
+            },
+            "attacks": {
+                x.abbreviation(): {
+                    "name": x.name(),
+                    "desc": x.desc(),
+                    "target": x.target().value
+                }
+                for x in self._attacks
             },
             "quic_draft": testcases.QUIC_DRAFT,
             "quic_version": testcases.QUIC_VERSION,
             "results": [],
-            "attack_results": [],
+            "attack_results": {},
             "measurements": [],
         }
-
+        for target in AttackTarget:
+            out["attack_results"][target.value] = []
+            
         for client in self._clients:
             for server in self._servers:
                 results = []
@@ -340,11 +347,26 @@ class InteropRunner:
                     )
                 out["measurements"].append(measurements)
                 
+                
+        for attacker in self._attackers:
+            for server in self._servers:
                 attk_results = []
                 for attack in self._attacks:
                     r = None
-                    if hasattr(self.attack_results[server][client][attack], "value"):
-                        r = self.attack_results[server][client][attack].value
+                    result_table = {}
+                    target = attack.target()
+                    if target == AttackTarget.SERVER:
+                        result_table = self.attack_results[target.value][attacker][server]
+                    elif target == AttackTarget.CLIENT:  #TODO: make it work
+                        result_table = self.attack_results[target.value][attacker][client]
+                    elif target == AttackTarget.BOTH: #TODO: make it work
+                        result_table = self.attack_results[target.value][attacker][server][client]
+                            
+                    if hasattr(result_table[attack], "value"):
+                        r = result_table[attack].value
+                        #In case an error occured
+                        if r == None:
+                            r = TestResult.UNSUPPORTED
                     attk_results.append(
                         {
                             "abbr": attack.abbreviation(),
@@ -352,7 +374,7 @@ class InteropRunner:
                             "result": r,
                         }
                     )
-                out["attack_results"].append(attk_results)
+                out["attack_results"][attack.target().value].append(attk_results)
 
 
         f = open(self._output, "w")
@@ -540,6 +562,7 @@ class InteropRunner:
         self,
         server: str,
         client: str,
+        attacker: str,
         attack: Callable[[], attacks.Attack],
         log_dir_prefix: None,
     ) -> Tuple[TestResult, float]:
@@ -563,11 +586,13 @@ class InteropRunner:
             client_keylog_file=client_log_dir.name + "/keys.log",
             server_keylog_file=server_log_dir.name + "/keys.log",
         )
+        additional_print = ""
+        if attack.target() != AttackTarget.SERVER:
+            additional_print = ". Client: "+ client
         print(
             "Server: "
             + server
-            + ". Client: "
-            + client
+            + additional_print
             + ". Running attack: "
             + str(testcase)
         )
@@ -578,14 +603,12 @@ class InteropRunner:
             "CERTS=" + testcase.certs_dir() + " "
             "TESTCASE_SERVER=" + testcase.testname(Perspective.SERVER) + " "
             "TESTCASE_CLIENT=" + testcase.testname(Perspective.CLIENT) + " "
-            #"TESTCASE_SERVER=" + testcase.testname(Perspective.SERVER) + " "
-            #"TESTCASE_CLIENT=" + testcase.testname(Perspective.CLIENT) + " "
             "WWW=" + testcase.www_dir() + " "
             "DOWNLOADS=" + testcase.download_dir() + " "
             "SERVER_LOGS=" + server_log_dir.name + " "
             "CLIENT_LOGS=" + client_log_dir.name + " "
             'SCENARIO="{}" '
-            "ATTACKER="+ self._implementations["attacker-example"]["image"] + " "
+            "ATTACKER="+ self._implementations[attacker]["image"] + " "
             "ATTACK="+ testcase.name() + " "
             "CLIENT=" + self._implementations[client]["image"] + " "
             "SERVER=" + self._implementations[server]["image"] + " "
@@ -603,10 +626,8 @@ class InteropRunner:
         
         attk_name = attack.name()
         res_logger = threading.Thread(target=log_resources, args=(attk_name,"server", attacker_log_dir))
-        attack_detector = threading.Thread(target=wait_for_attack, args=("server", containers))
         
         res_logger.start()
-        attack_detector.start()
         
         status = TestResult.FAILED
         output = ""
@@ -627,10 +648,9 @@ class InteropRunner:
         logging.debug("%s", output.decode("utf-8"))
         
         res_logger.join(timeout=0.1)
-        attack_detector.join(timeout=0.1)
         
         if expired:
-            logging.debug("Attack timeout: took longer than %ds.", testcase.timeout())
+            logging.debug("Attack ended after %ds.", testcase.timeout())
             r = subprocess.run(
                 "docker-compose stop " + containers,
                 shell=True,
@@ -660,7 +680,10 @@ class InteropRunner:
         logging.getLogger().removeHandler(log_handler)
         log_handler.close()
         if status == TestResult.FAILED or status == TestResult.SUCCEEDED:
-            log_dir = self._log_dir + "/" + server + "_" + client + "/" + str(testcase)
+            config = attacker + "_" + server
+            if attack.target() != AttackTarget.SERVER:
+                config += "_" + client
+            log_dir = self._log_dir + "/" + config + "/" + str(testcase)
             if log_dir_prefix:
                 log_dir += "/" + log_dir_prefix
             shutil.copytree(server_log_dir.name, log_dir + "/server")
@@ -679,7 +702,7 @@ class InteropRunner:
         server_log_dir.cleanup()
         client_log_dir.cleanup()
         sim_log_dir.cleanup()
-        attacker_log_dir.cleanup()
+        #attacker_log_dir.cleanup()
         
         logging.debug("Test took %ss", (datetime.now() - start_time).total_seconds())
 
@@ -721,11 +744,13 @@ class InteropRunner:
                 for measurement in self._measurements:
                     res = self._run_measurement(server, client, measurement)
                     self.measurement_results[server][client][measurement] = res
-                
+            
+        for attacker in self._attackers:
+            for server in self._servers:
                 # run the attacks
                 for attack in self._attacks:
-                    status = self._run_attack(server, client, attack, None)[0]
-                    self.attack_results[server][client][attack] = status
+                    status = self._run_attack(server, client, attacker, attack, None)[0]
+                    self.attack_results[attack.target().value][attacker][server][attack] = status #todo: make it work on any target
 
         self._print_results()
         self._export_results()

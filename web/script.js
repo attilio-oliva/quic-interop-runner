@@ -2,9 +2,9 @@
 
 (function() {
   "use strict";
-  const map = { client: {}, server: {}, test: {} };
+  const map = { client: {}, server: {}, test: {} , attack: {}};
   const color_type = { succeeded: "success", unsupported: "secondary disabled", failed: "danger"};
-
+  const attack_target = {client: "client", server: "server", both:"both"};
   // see https://stackoverflow.com/a/43466724/
   function formatTime(seconds) {
     return [
@@ -14,14 +14,14 @@
     ].join(":").replace(/\b(\d)\b/g, "0$1");
   }
 
-  function getLogLink(log_dir, server, client, test, text, res) {
+  function getLogLink(log_dir, server, client, test, text, res, type="test") {
     var ttip = "<b>Test:</b> " + test + "<br>" +
                "<b>Client:</b> " + client + "<br>" +
                "<b>Server:</b> " + server + "<br>" +
                "<b>Result: <span class=\"text-" + color_type[res] + "\">" + res + "</span></b>";
 
     var a = document.createElement("a");
-    a.className = "btn btn-xs btn-" + color_type[res] + " " + res + " test-" + text.toLowerCase();
+    a.className = "btn btn-xs btn-" + color_type[res] + " " + res + " " + type + "-" + text.toLowerCase();
     var ttip_target = a;
     if (res !== "unsupported") {
       a.href = "logs/" + log_dir + "/" + server + "_" + client + "/" + test;
@@ -130,6 +130,41 @@
     }
   }
 
+  function fillAttackTable(result) {
+    var index = 0;
+
+    for(var target in attack_target) {
+      if(result.attack_results[target].length==0) {
+        continue;
+      }
+      var clients = (target != attack_target.server) ? result.clients : result.attackers;
+      var servers = (target != attack_target.client) ? result.servers : result.attackers;
+
+      var appendResult = function(el, res, i, j) {
+        result.attack_results[target][index].forEach(function(item) {
+          if(item.result !== res) return;
+          el.appendChild(getLogLink(result.log_dir, servers[j], clients[i], item.name, item.abbr, res, "attack"));
+        });
+      };
+
+      var t = document.getElementById(target + "_attack_results");
+      t.innerHTML = "";
+      makeColumnHeaders(t, result);
+      var tbody = t.createTBody();
+      for(var i = 0; i < clients.length; i++) {
+        var row = makeRowHeader(tbody, result, i);
+        for(var j = 0; j < servers.length; j++) {
+          var cell = row.insertCell(j+1);
+          cell.className = "server-" + servers[j] + " client-" + clients[i];
+          appendResult(cell, "succeeded", i, j);
+          appendResult(cell, "unsupported", i, j);
+          appendResult(cell, "failed", i, j);
+          index++;
+        }
+      }
+    }
+  }
+
   function dateToString(date) {
     return date.toLocaleDateString("en-US",  { timeZone: 'UTC' }) + " " + date.toLocaleTimeString("en-US", { timeZone: 'UTC', timeZoneName: 'short' });
   }
@@ -165,16 +200,36 @@
       show[type] = map[type].map(e => "." + type + "-" + e);
     });
 
-    $(".result td").add(".result th").add(".result td a").hide();
+    //$(".result td").add(".result th").add(".result td a").hide();
 
     const show_classes = show.client.map(el1 => show.server.map(el2 => el1 + el2)).flat().join();
     $(".client-any," + show_classes).show();
 
     $(".result " + show.client.map(e => "th" + e).join()).show();
     $(".result " + show.server.map(e => "th" + e).join()).show();
-    $(".measurement," + show.test.join()).show();
-
+    if(show.test.length!=0) //TODO remove
+      $(".measurement," + show.test.join()).show();
+    if(show.attack.length!=0) {
+      $(".attack, " + show.attack.join()).show();
+    }
     $("#test :button").each((i, e) => {
+      $(e).find("span,br").remove();
+      var count = { succeeded: 0, unsupported: 0, failed: 0};
+      Object.keys(count).map(c => count[c] = $(".btn." + e.id + "." + c + ":visible").length);
+      Object.keys(count).map(c => {
+        e.appendChild(document.createElement("br"));
+        var b = document.createElement("span");
+        b.innerHTML = count[c];
+        b.className = "btn btn-xs btn-" + color_type[c];
+        if (e.classList.contains("active") === false)
+          b.className += " disabled";
+        b.id = e.id + "-" + c;
+        $(b).hover(toggleHighlight, toggleHighlight);
+        e.appendChild(b);
+      });
+    });
+
+    $("#attack :button").each((i, e) => {
       $(e).find("span,br").remove();
       var count = { succeeded: 0, unsupported: 0, failed: 0};
       Object.keys(count).map(c => count[c] = $(".btn." + e.id + "." + c + ":visible").length);
@@ -241,6 +296,7 @@
 
     fillInteropTable(result);
     fillMeasurementTable(result);
+    fillAttackTable(result);
 
     $("#client").add("#server").add("#test").empty();
     $("#client").append(result.clients.map(e => makeButton("client", e)));
@@ -252,6 +308,11 @@
       const tcases = result.results.concat(result.measurements).flat().map(x => [x.abbr, x.name]).filter((e, i, a) => a.map(x => x[0]).indexOf(e[0]) === i);
       $("#test").append(tcases.map(e => makeButton("test", e[0], makeTooltip(e[1]))));
     }
+    if (result.hasOwnProperty("attacks"))
+    {
+      $("#attack").append(Object.keys(result.attacks).map(e => makeButton("attack", e, makeTooltip(result.attacks[e].name, result.attacks[e].desc))));
+    }
+
     setButtonState();
 
     $("table.result").delegate("td", "mouseover mouseleave", function(e) {
@@ -311,3 +372,4 @@
   };
   xhr.send();
 })();
+

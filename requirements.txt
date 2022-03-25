@@ -1,4 +1,4 @@
 pycrypto
 termcolor
 prettytable
-pyshark
+pyshark==0.4.3

@@ -1,3 +1,4 @@
+import abc
 import logging
 
 import re
@@ -24,8 +25,14 @@ class Perspective(Enum):
     CLIENT = "client"
     ATTACKER = "attacker"
 
+class AttackTarget(Enum):
+    SERVER = "server"
+    CLIENT = "client"
+    BOTH = "both"
+
 class Attack(TestCase):
     _attacker_log_dir = None
+    
     def __init__(
         self,
         sim_log_dir: tempfile.TemporaryDirectory,
@@ -41,6 +48,10 @@ class Attack(TestCase):
             self._cert_dir = tempfile.TemporaryDirectory(dir="/tmp", prefix="certs_")
             testcases.generate_cert_chain(self._cert_dir.name)
         return self._cert_dir.name + "/"
+    
+    @abc.abstractmethod
+    def target(self) -> AttackTarget:
+        pass
 class AttackInitFlood(Attack):
     
     @staticmethod
@@ -62,17 +73,17 @@ class AttackInitFlood(Attack):
 
     @staticmethod
     def timeout() -> int:
-        return 30
+        return 15
+    
+    @staticmethod
+    def target() -> AttackTarget:
+        return AttackTarget.SERVER
     
     def get_paths(self):
         return [""]
     
-
     def check(self) -> TestResult:
         attack_log_file = self._attacker_log_dir.name + f"/{self.name()}.log"
-        #ResourceAnalyzer(
-        #        self._attacker_log_dir.name + f"/{self._attack_log_file}", self._keylog_file()
-        #)
         log = open(attack_log_file, "r")
         reg_exp = r"\d{0,1}\d\.\d\d\%"
         # exponential moving average
@@ -89,16 +100,6 @@ class AttackInitFlood(Attack):
                 if cpu_usage >= 20 or ema >= 15:
                     return TestResult.SUCCEEDED
         return TestResult.FAILED
-    
-class ResourceAnalyzer:
-    _filename = ""
-
-    def __init__(self, filename: str, keylog_file: Optional[str] = None):
-        self._filename = filename
-        self._keylog_file = keylog_file
-    def get_cpu_usage(self) -> List:
-        # read from file...
-        self._filename
         
         
 ATTACKS = [
